@@ -56,20 +56,45 @@ function Login() {
       }
 
       // Save JWT and user details
+      // Get JWT token from login response
+      const token =
+        data.token ||
+        data.accessToken ||
+        data.jwtToken ||
+        data.data?.token ||
+        data.data?.accessToken;
+
+      if (!token) {
+        throw new Error(
+          "Login successful, but JWT token was not received from backend."
+        );
+      }
+
+      // Remove Bearer prefix if backend already includes it
+      const cleanToken = token.replace(/^Bearer\s+/i, "").trim();
+
+      // Save user details
       const userData = {
-        id: data.id,
-        name: data.name,
-        fullName: data.name,
-        email: data.email,
-        role: data.role,
-        token: data.token,
+        id: data.id || data.data?.id,
+        name: data.name || data.data?.name,
+        fullName: data.name || data.data?.name,
+        email: data.email || data.data?.email,
+        role: data.role || data.data?.role,
+        token: cleanToken,
         profileImage: "",
       };
+
+      // Save JWT in BOTH locations
+      localStorage.setItem("petilio_token", cleanToken);
 
       localStorage.setItem(
         "petilio_user",
         JSON.stringify(userData)
       );
+
+      console.log("Login successful");
+      console.log("JWT saved:", Boolean(localStorage.getItem("petilio_token")));
+      console.log("JWT parts:", cleanToken.split(".").length);
 
       // Notify Navbar
       window.dispatchEvent(new Event("authUpdated"));

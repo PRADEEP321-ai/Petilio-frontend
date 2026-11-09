@@ -11,19 +11,39 @@ import {
 const API_URL = "http://localhost:8080/api/product";
 const CART_URL = "http://localhost:8080/api/cart";
 
-// Request headers with the login token
-// ADJUST: assumes your login saved a JWT as user.token inside "petilio_user"
-const getHeaders = () => {
-  const user = JSON.parse(localStorage.getItem("petilio_user") || "{}");
-  const token = user.token || user.accessToken || user.jwt || user.jwtToken;
-
-  const headers = { "Content-Type": "application/json" };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+// Read the logged-in user saved by the Login page
+const getUser = () => {
+  try {
+    return JSON.parse(localStorage.getItem("petilio_user")) || null;
+  } catch (error) {
+    return null;
   }
+};
 
-  return headers;
+// ADJUST: assumes your login saved a JWT as user.token inside "petilio_user"
+const getToken = () => {
+  const user = getUser();
+
+  return (
+    localStorage.getItem("petilio_token") ||
+    user?.token ||
+    user?.accessToken ||
+    user?.jwt ||
+    user?.jwtToken ||
+    null
+  );
+};
+
+// Request headers with the login token
+const getHeaders = () => {
+  const token = getToken();
+
+  return {
+    "Content-Type": "application/json",
+    ...(token && {
+      Authorization: `Bearer ${token.replace(/^Bearer\s+/i, "")}`,
+    }),
+  };
 };
 
 const faqs = [
@@ -157,24 +177,25 @@ function ProductDetail() {
 
   // Add to cart (saved in the database through the cart API)
   const handleAddToCart = async () => {
+
+    console.log("Token exists:", !!getToken());
+    console.log("Token length:", getToken()?.length);
     if (!product || adding) return;
 
-    // Check login
-    const user = localStorage.getItem("petilio_user");
-
-    if (!user) {
+    // 1. must be logged in: check the token, not just the key
+    if (!getToken()) {
       alert("Please login to add products to your cart.");
-      navigate("/login");
+      navigate("/login", { state: { from: location.pathname } });
       return;
     }
 
-    // The cart works with variants, so a variant is required
-    if (!selectedVariant) {
-      alert("This product has no size or variant to add to the cart.");
+    // 2. a product with sizes needs a selected size
+    if (variants.length > 0 && !selectedVariant) {
+      alert("Please select a size.");
       return;
     }
 
-    // Check stock
+    // 3. check stock
     if (stock <= 0) {
       alert("This product is currently out of stock.");
       return;
@@ -188,27 +209,40 @@ function ProductDetail() {
     try {
       setAdding(true);
 
-      // save the item in the database
       const response = await fetch(`${CART_URL}/add`, {
         method: "POST",
         headers: getHeaders(),
         body: JSON.stringify({
-          variantId: selectedVariant.id,
+          productId: product.id,
+          // null for products without sizes, like the cat brush
+          variantId: variants.length > 0 ? selectedVariant.id : null,
           quantity: quantity,
         }),
       });
 
-      // token missing or expired
+      // token missing, expired or rejected
       if (response.status === 401) {
-        alert("Please login again.");
-        navigate("/login");
+        localStorage.removeItem("petilio_user");
+        localStorage.removeItem("petilio_token");
+
+        alert("Your session has expired. Please login again.");
+
+        navigate("/login", {
+          state: { from: location.pathname },
+        });
+
         return;
       }
 
-      // backend errors like "Only 3 items available in stock."
+      if (response.status === 403) {
+        alert("Access denied. Please check your account permissions.");
+        return;
+      }
+
+      // backend errors like "Only 3 left in stock"
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.message || "Could not add to cart.");
+        throw new Error(data.message || data.error || "Could not add to cart.");
       }
 
       const cartData = await response.json();
@@ -294,11 +328,10 @@ function ProductDetail() {
                   <button
                     key={index}
                     onClick={() => setSelectedImage(index)}
-                    className={`aspect-square overflow-hidden rounded-xl border-2 transition ${
-                      selectedImage === index
-                        ? "border-[#ffe44d]"
-                        : "border-transparent"
-                    }`}
+                    className={`aspect-square overflow-hidden rounded-xl border-2 transition ${selectedImage === index
+                      ? "border-[#ffe44d]"
+                      : "border-transparent"
+                      }`}
                   >
                     <img
                       src={image}
@@ -355,11 +388,10 @@ function ProductDetail() {
                         setQuantity(1);
                         setAdded(false);
                       }}
-                      className={`min-w-16 rounded-full border px-5 py-2 text-sm transition ${
-                        String(selectedVariantId) === String(variant.id)
-                          ? "border-[#ffe44d] bg-[#ffe44d] text-[#4a2a35]"
-                          : "border-white/80 text-white hover:border-[#ffe44d]"
-                      }`}
+                      className={`min-w-16 rounded-full border px-5 py-2 text-sm transition ${String(selectedVariantId) === String(variant.id)
+                        ? "border-[#ffe44d] bg-[#ffe44d] text-[#4a2a35]"
+                        : "border-white/80 text-white hover:border-[#ffe44d]"
+                        }`}
                     >
                       {variant.size}
                     </button>
@@ -462,9 +494,8 @@ function ProductDetail() {
 
                   <ChevronDown
                     size={17}
-                    className={`shrink-0 transition-transform ${
-                      openFaq === index ? "rotate-180" : ""
-                    }`}
+                    className={`shrink-0 transition-transform ${openFaq === index ? "rotate-180" : ""
+                      }`}
                   />
                 </button>
 

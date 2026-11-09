@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -12,12 +11,93 @@ import {
   Wallet,
 } from "lucide-react";
 
+const API_URL = "http://localhost:8080/api/orders";
+
+// Get the JWT token from the possible localStorage locations
+const getAuthToken = () => {
+  const tokenKeys = [
+    "petilio_token",
+    "token",
+    "accessToken",
+    "authToken",
+    "jwtToken",
+  ];
+
+  // Check separate token keys
+  const getAuthToken = () => {
+  try {
+    // First get the currently logged-in user
+    const user = JSON.parse(
+      localStorage.getItem("petilio_user") || "null"
+    );
+
+    // Prefer the token saved during the latest login
+    let token =
+      user?.token ||
+      user?.accessToken ||
+      user?.jwtToken ||
+      user?.jwt ||
+      user?.data?.token ||
+      null;
+
+    // Fallback to separate token storage
+    if (!token) {
+      token = localStorage.getItem("petilio_token");
+    }
+
+    if (!token) {
+      return null;
+    }
+
+    // Remove Bearer prefix if already present
+    return token.replace(/^Bearer\s+/i, "").trim();
+
+  } catch (error) {
+    console.error("Token retrieval error:", error);
+    return null;
+  }
+};
+
+  // Check token inside saved user
+  try {
+    const savedUser = JSON.parse(
+      localStorage.getItem("petilio_user") || "null"
+    );
+
+    if (!savedUser) return null;
+
+    return (
+      savedUser.token ||
+      savedUser.accessToken ||
+      savedUser.jwtToken ||
+      savedUser.jwt ||
+      savedUser.user?.token ||
+      savedUser.data?.token ||
+      savedUser.data?.accessToken ||
+      null
+    );
+  } catch {
+    return null;
+  }
+};
+
+// Get logged-in user
+const getSavedUser = () => {
+  try {
+    return JSON.parse(localStorage.getItem("petilio_user") || "null");
+  } catch {
+    return null;
+  }
+};
+
 function Checkout() {
   const navigate = useNavigate();
 
   const [cart, setCart] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [cartLoading, setCartLoading] = useState(true);
 
   const [formData, setFormData] = useState({
     fullName: "",
@@ -31,48 +111,67 @@ function Checkout() {
     instructions: "",
   });
 
-  // Load logged-in user and cart
+  // Load user and cart
   useEffect(() => {
-    const savedUser = localStorage.getItem("petilio_user");
+    const user = getSavedUser();
+    const token = getAuthToken();
 
-    if (!savedUser) {
+    // If user is not logged in, go to login
+    if (!user) {
       navigate("/login");
       return;
     }
 
-    try {
-      const user = JSON.parse(savedUser);
+    // Load user information
+    setFormData((previous) => ({
+      ...previous,
+      fullName:
+        user.fullName ||
+        user.name ||
+        user.user?.fullName ||
+        "",
+      email:
+        user.email ||
+        user.user?.email ||
+        "",
+      phone:
+        user.phoneNo ||
+        user.phoneNumber ||
+        user.phone ||
+        "",
+    }));
 
-      setFormData((previous) => ({
-        ...previous,
-        fullName: user.name || "",
-        email: user.email || "",
-        phone: user.phone || "",
-      }));
-    } catch {
-      navigate("/login");
-      return;
+    // Do not redirect if the user exists but token is missing.
+    // Show the token error when Place Order is clicked instead.
+    if (!token) {
+      console.error(
+        "JWT token not found. Check your Login.jsx token storage."
+      );
     }
 
+    // Load cart
     try {
       const savedCart = JSON.parse(
         localStorage.getItem("petilio_cart") || "[]"
       );
 
       setCart(Array.isArray(savedCart) ? savedCart : []);
-    } catch {
+    } catch (error) {
+      console.error("Cart loading error:", error);
       setCart([]);
+    } finally {
+      setCartLoading(false);
     }
   }, [navigate]);
 
-  // Convert product price into a number
+  // Convert price into number
   const getPrice = (price) => {
-    return Number(String(price).replace(/[^0-9.]/g, "")) || 0;
+    return Number(String(price || 0).replace(/[^0-9.]/g, "")) || 0;
   };
 
   // Format price
   const formatPrice = (price) => {
-    return `₹${Number(price).toLocaleString("en-IN", {
+    return `₹${Number(price || 0).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
@@ -80,16 +179,13 @@ function Checkout() {
 
   // Calculate subtotal
   const subtotal = cart.reduce((total, item) => {
-    return (
-      total +
-      getPrice(item.price) * Number(item.quantity || 1)
-    );
+    return total + getPrice(item.price) * Number(item.quantity || 1);
   }, 0);
 
   // Delivery fee
   const deliveryFee = subtotal >= 999 ? 0 : 49;
 
-  // Final total
+  // Total
   const total = subtotal + deliveryFee;
 
   // Total items
@@ -108,23 +204,32 @@ function Checkout() {
   };
 
   // Place order
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage("");
 
-    // Check login
-    let user;
+    const user = getSavedUser();
+    const token = getAuthToken();
 
-    try {
-      user = JSON.parse(
-        localStorage.getItem("petilio_user") || "null"
-      );
-    } catch {
-      user = null;
-    }
-
+    // Check user login
     if (!user) {
       navigate("/login");
+      return;
+    }
+
+    // Check JWT token
+    if (!token) {
+      setMessage(
+        "Authentication token not found. Please log out and log in again."
+      );
+
+      console.error("JWT token missing from localStorage.");
+      console.log("Saved user:", user);
+      console.log(
+        "petilio_token:",
+        localStorage.getItem("petilio_token")
+      );
+
       return;
     }
 
@@ -134,104 +239,150 @@ function Checkout() {
       return;
     }
 
-    // Validate phone
+    // Validate form
+    if (!formData.fullName.trim()) {
+      setMessage("Please enter your full name.");
+      return;
+    }
+
+    if (!formData.email.trim()) {
+      setMessage("Please enter your email address.");
+      return;
+    }
+
     if (!/^[0-9]{10}$/.test(formData.phone)) {
       setMessage("Please enter a valid 10-digit mobile number.");
       return;
     }
 
-    // Validate PIN code
+    if (!formData.address.trim()) {
+      setMessage("Please enter your house or building details.");
+      return;
+    }
+
+    if (!formData.city.trim() || !formData.state.trim()) {
+      setMessage("Please enter your city and state.");
+      return;
+    }
+
     if (!/^[0-9]{6}$/.test(formData.pincode)) {
       setMessage("Please enter a valid 6-digit PIN code.");
       return;
     }
 
-    // Create order object
-    const newOrder = {
-      id: "PET" + Date.now(),
-
-      userEmail: user.email,
-
-      customer: {
-        fullName: formData.fullName,
-        email: formData.email,
-        phone: formData.phone,
-      },
-
-      deliveryAddress: {
-        address: formData.address,
-        apartment: formData.apartment,
-        city: formData.city,
-        state: formData.state,
-        pincode: formData.pincode,
-        instructions: formData.instructions,
-      },
-
-      items: cart.map((item) => ({
-        ...item,
-        price: getPrice(item.price),
-        quantity: Number(item.quantity || 1),
-      })),
-
-      subtotal: subtotal,
-      deliveryFee: deliveryFee,
-      total: total,
-
-      paymentMethod: paymentMethod,
-
-      paymentStatus:
-        paymentMethod === "cod"
-          ? "Pay on Delivery"
-          : "Demo Payment Completed",
-
-      orderStatus: "Order Placed",
-
-      orderDate: new Date().toISOString(),
+    // Data matching CheckoutReuestDto
+    const checkoutData = {
+      contactName: formData.fullName.trim(),
+      contactEmail: formData.email.trim(),
+      contactMobile: formData.phone.trim(),
+      houseNumber: formData.address.trim(),
+      street: formData.apartment.trim(),
+      city: formData.city.trim(),
+      state: formData.state.trim(),
+      pinCode: formData.pincode.trim(),
+      deliveryInstructions: formData.instructions.trim(),
+      paymentMethod: paymentMethod.toUpperCase(),
     };
 
-    // Get existing orders
-    let previousOrders = [];
-
     try {
-      previousOrders = JSON.parse(
-        localStorage.getItem("petilio_orders") || "[]"
-      );
+      setLoading(true);
 
-      if (!Array.isArray(previousOrders)) {
-        previousOrders = [];
+      console.log("Checkout request data:", checkoutData);
+      console.log("JWT token exists:", Boolean(token));
+      console.log("JWT token length:", token.length);
+
+      const response = await fetch(`${API_URL}/checkout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(checkoutData),
+      });
+
+      const responseData = await response.json().catch(() => null);
+
+      console.log("Checkout status:", response.status);
+      console.log("Checkout response:", responseData);
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setMessage(
+            "Your login session is invalid or expired. Please log in again."
+          );
+          return;
+        }
+
+        if (response.status === 403) {
+          setMessage(
+            "You do not have permission to place this order."
+          );
+          return;
+        }
+
+        if (responseData?.message) {
+          setMessage(responseData.message);
+        } else if (responseData?.errors) {
+          setMessage(
+            Object.values(responseData.errors).join(", ")
+          );
+        } else {
+          setMessage(
+            `Unable to place your order. Server returned ${response.status}.`
+          );
+        }
+
+        return;
       }
-    } catch {
-      previousOrders = [];
+
+      // Order successfully created
+      localStorage.removeItem("petilio_cart");
+
+      setCart([]);
+
+      // Update Navbar cart count
+      window.dispatchEvent(new Event("cartUpdated"));
+
+      // Notify My Orders page
+      window.dispatchEvent(new Event("ordersUpdated"));
+
+      // Redirect to My Orders
+      navigate("/my-orders", {
+        state: {
+          newOrderId: responseData?.id || responseData?.orderId,
+        },
+      });
+    } catch (error) {
+      console.error("Checkout error:", error);
+
+      setMessage(
+        "Unable to connect to the server. Please check whether your backend is running."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    // Save new order
-    const updatedOrders = [newOrder, ...previousOrders];
-
-    localStorage.setItem(
-      "petilio_orders",
-      JSON.stringify(updatedOrders)
-    );
-
-    // Clear cart
-    localStorage.removeItem("petilio_cart");
-
-    // Update Navbar cart count
-    window.dispatchEvent(new Event("cartUpdated"));
-
-    // Redirect to My Orders
-    navigate("/my-orders", {
-      state: {
-        newOrderId: newOrder.id,
-      },
-    });
   };
+
+  // Loading screen
+  if (cartLoading) {
+    return (
+      <div className="min-h-screen bg-[#fffaf4] flex items-center justify-center">
+        <p className="text-[#8b7167] font-medium">
+          Loading checkout...
+        </p>
+      </div>
+    );
+  }
 
   // Empty cart
   if (cart.length === 0) {
     return (
       <div className="min-h-screen bg-[#fffaf4] flex items-center justify-center px-5">
         <div className="text-center bg-white rounded-3xl p-10 shadow-sm max-w-md w-full">
-          <ShoppingBag size={55} className="mx-auto text-[#b47c43] mb-5" />
+          <ShoppingBag
+            size={55}
+            className="mx-auto text-[#b47c43] mb-5"
+          />
 
           <h2 className="text-3xl font-bold text-[#38251f] mb-3">
             Your cart is empty
@@ -490,11 +641,13 @@ function Checkout() {
                 <div className="space-y-4">
 
                   {/* Cash on Delivery */}
-                  <label className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition ${
-                    paymentMethod === "cod"
-                      ? "border-[#b47c43] bg-[#fffaf4]"
-                      : "border-[#eadfd5]"
-                  }`}>
+                  <label
+                    className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition ${
+                      paymentMethod === "cod"
+                        ? "border-[#b47c43] bg-[#fffaf4]"
+                        : "border-[#eadfd5]"
+                    }`}
+                  >
                     <input
                       type="radio"
                       name="payment"
@@ -510,7 +663,6 @@ function Checkout() {
                       <p className="font-semibold text-[#38251f]">
                         Cash on Delivery
                       </p>
-
                       <p className="text-xs text-gray-400">
                         Pay when your order arrives
                       </p>
@@ -518,11 +670,13 @@ function Checkout() {
                   </label>
 
                   {/* UPI */}
-                  <label className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition ${
-                    paymentMethod === "upi"
-                      ? "border-[#b47c43] bg-[#fffaf4]"
-                      : "border-[#eadfd5]"
-                  }`}>
+                  <label
+                    className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition ${
+                      paymentMethod === "upi"
+                        ? "border-[#b47c43] bg-[#fffaf4]"
+                        : "border-[#eadfd5]"
+                    }`}
+                  >
                     <input
                       type="radio"
                       name="payment"
@@ -538,7 +692,6 @@ function Checkout() {
                       <p className="font-semibold text-[#38251f]">
                         UPI Payment
                       </p>
-
                       <p className="text-xs text-gray-400">
                         Google Pay, PhonePe, Paytm and more
                       </p>
@@ -546,11 +699,13 @@ function Checkout() {
                   </label>
 
                   {/* Card */}
-                  <label className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition ${
-                    paymentMethod === "card"
-                      ? "border-[#b47c43] bg-[#fffaf4]"
-                      : "border-[#eadfd5]"
-                  }`}>
+                  <label
+                    className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition ${
+                      paymentMethod === "card"
+                        ? "border-[#b47c43] bg-[#fffaf4]"
+                        : "border-[#eadfd5]"
+                    }`}
+                  >
                     <input
                       type="radio"
                       name="payment"
@@ -566,7 +721,6 @@ function Checkout() {
                       <p className="font-semibold text-[#38251f]">
                         Credit / Debit Card
                       </p>
-
                       <p className="text-xs text-gray-400">
                         Visa, Mastercard and other supported cards
                       </p>
@@ -576,7 +730,9 @@ function Checkout() {
 
                 {paymentMethod !== "cod" && (
                   <p className="mt-4 text-sm text-[#8b7167] bg-[#fffaf4] p-4 rounded-xl">
-                    This is a demo payment. A real payment gateway is required to process actual UPI or card payments.
+                    Online payment is not active yet. Your order will be
+                    created with pending payment status until a payment
+                    gateway is integrated.
                   </p>
                 )}
               </div>
@@ -622,7 +778,7 @@ function Checkout() {
                         )}
 
                         <p className="text-xs text-gray-400 mt-1">
-                          Qty: {item.quantity}
+                          Qty: {item.quantity || 1}
                         </p>
 
                         <p className="font-bold text-[#b47c43] mt-1">
@@ -668,7 +824,7 @@ function Checkout() {
 
                 <div className="flex justify-between items-center mb-6">
                   <span className="font-bold text-[#38251f] text-lg">
-                    Total Amount
+                    Estimated Total
                   </span>
 
                   <span className="font-bold text-2xl text-[#b47c43]">
@@ -684,11 +840,10 @@ function Checkout() {
 
                 <button
                   type="submit"
-                  className="w-full bg-[#38251f] text-white py-4 rounded-full font-semibold hover:bg-[#b47c43] transition duration-300"
+                  disabled={loading}
+                  className="w-full bg-[#38251f] text-white py-4 rounded-full font-semibold hover:bg-[#b47c43] transition duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {paymentMethod === "cod"
-                    ? "Place Order"
-                    : "Complete Demo Payment"}
+                  {loading ? "Placing Order..." : "Place Order"}
                 </button>
 
                 <div className="flex items-center justify-center gap-2 text-xs text-gray-400 mt-5">
@@ -703,7 +858,10 @@ function Checkout() {
               </div>
 
               <div className="mt-5 bg-[#faeee9] rounded-2xl p-5 flex gap-3">
-                <CheckCircle className="text-[#b47c43] shrink-0" size={22} />
+                <CheckCircle
+                  className="text-[#b47c43] shrink-0"
+                  size={22}
+                />
 
                 <div>
                   <p className="font-semibold text-[#38251f] text-sm">

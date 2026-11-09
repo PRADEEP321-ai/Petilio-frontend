@@ -15,15 +15,30 @@ const CART_URL = "http://localhost:8080/api/cart";
 
 // Request headers with the login token
 // ADJUST: assumes your login saved a JWT as user.token inside "petilio_user"
+const getToken = () => {
+  const user = JSON.parse(
+    localStorage.getItem("petilio_user") || "{}"
+  );
+
+  return (
+    localStorage.getItem("petilio_token") ||
+    user.token ||
+    user.accessToken ||
+    user.jwt ||
+    user.jwtToken ||
+    null
+  );
+};
+
 const getHeaders = () => {
-  const user = JSON.parse(localStorage.getItem("petilio_user") || "{}");
-  const headers = { "Content-Type": "application/json" };
+  const token = getToken();
 
-  if (user.token) {
-    headers.Authorization = `Bearer ${user.token}`;
-  }
-
-  return headers;
+  return {
+    "Content-Type": "application/json",
+    ...(token && {
+      Authorization: `Bearer ${token.replace(/^Bearer\s+/i, "")}`,
+    }),
+  };
 };
 
 function Cart() {

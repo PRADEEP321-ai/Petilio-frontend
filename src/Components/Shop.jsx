@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ShoppingBag, PackageOpen, Truck } from "lucide-react";
@@ -7,6 +6,7 @@ const API_URL = "http://localhost:8080/api/product/getAllProducts";
 
 const FILTERS = ["all", "feed", "vitamins", "accessories"];
 
+// ---------- FORMAT PRICE ----------
 const formatPrice = (price) =>
   Number(price || 0).toLocaleString("en-IN", {
     style: "currency",
@@ -14,6 +14,7 @@ const formatPrice = (price) =>
     maximumFractionDigits: 0,
   });
 
+// ---------- DELIVERY STEPS ----------
 const STEPS = [
   {
     Icon: ShoppingBag,
@@ -32,6 +33,7 @@ const STEPS = [
   },
 ];
 
+// ---------- FILTER BUTTON ----------
 function FilterButton({ label, active, onClick }) {
   return (
     <button
@@ -48,6 +50,7 @@ function FilterButton({ label, active, onClick }) {
   );
 }
 
+// ---------- PRODUCT CARD ----------
 function ProductCard({ product, relatedProducts }) {
   return (
     <div className="group">
@@ -57,14 +60,20 @@ function ProductCard({ product, relatedProducts }) {
         className="block"
       >
         <div className="aspect-[6/7] overflow-hidden rounded-3xl bg-white">
-          <img
-            src={product.image}
-            alt={product.name}
-            onError={(e) => {
-              e.currentTarget.style.display = "none";
-            }}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-          />
+          {product.image ? (
+            <img
+              src={product.image}
+              alt={product.name || "Pet product"}
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+              className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-gray-400">
+              No image available
+            </div>
+          )}
         </div>
 
         <div className="px-5 pt-4">
@@ -74,7 +83,8 @@ function ProductCard({ product, relatedProducts }) {
 
           <p className="mt-1 text-sm text-[#4a2a35]/70">
             {formatPrice(product.price)}
-            {product.oldPrice > product.price && (
+
+            {Number(product.oldPrice) > Number(product.price) && (
               <span className="ml-2 line-through">
                 {formatPrice(product.oldPrice)}
               </span>
@@ -86,6 +96,7 @@ function ProductCard({ product, relatedProducts }) {
   );
 }
 
+// ---------- DELIVERY STEP ----------
 function Step({ Icon, title, text }) {
   return (
     <div className="flex items-center gap-4">
@@ -97,6 +108,7 @@ function Step({ Icon, title, text }) {
         <h4 className="font-serif text-2xl font-medium text-[#4a2a35]">
           {title}
         </h4>
+
         <p className="mt-1 max-w-[260px] text-sm text-[#4a2a35]/70">
           {text}
         </p>
@@ -105,16 +117,20 @@ function Step({ Icon, title, text }) {
   );
 }
 
+// ---------- SHOP COMPONENT ----------
 function Shop() {
   const [activeFilter, setActiveFilter] = useState("all");
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Fetch products from Spring Boot
+  // ---------- FETCH PRODUCTS ----------
   useEffect(() => {
     const fetchProducts = async () => {
       try {
+        setLoading(true);
+        setError("");
+
         const response = await fetch(API_URL);
 
         if (!response.ok) {
@@ -123,39 +139,61 @@ function Shop() {
 
         const data = await response.json();
 
+        // Handle different backend response formats
         const productList = Array.isArray(data)
           ? data
           : data.content || data.products || data.data || [];
 
+        if (!Array.isArray(productList)) {
+          throw new Error("Invalid product data received from server.");
+        }
+
         // Convert backend products into frontend format
         const formattedProducts = productList.map((item) => {
           const variants = item.variants || [];
-
           const firstVariant = variants[0];
+
+          const category = String(item.category || "").toLowerCase();
 
           return {
             ...item,
+
             id: item.id,
-            name: item.productName,
-            image: item.imageUrl,
-            price: firstVariant
-              ? firstVariant.price
-              : item.price,
-            oldPrice: firstVariant
-              ? firstVariant.oldPrice
-              : item.oldPrice,
-            category: ["food", "treats", "feed"].includes(
-              String(item.category).toLowerCase()
-            )
+
+            name:
+              item.productName ||
+              item.name ||
+              item.title ||
+              "Unnamed Product",
+
+            image:
+              item.imageUrl ||
+              item.image ||
+              item.img ||
+              "",
+
+            price:
+              firstVariant?.price ??
+              item.price ??
+              0,
+
+            oldPrice:
+              firstVariant?.oldPrice ??
+              item.oldPrice ??
+              0,
+
+            category: ["food", "treats", "feed"].includes(category)
               ? "feed"
-              : String(item.category).toLowerCase(),
+              : category,
+
             variants: variants,
           };
         });
 
         setProducts(formattedProducts);
+
       } catch (err) {
-        setError(err.message);
+        setError(err.message || "Something went wrong while loading products.");
       } finally {
         setLoading(false);
       }
@@ -164,6 +202,7 @@ function Shop() {
     fetchProducts();
   }, []);
 
+  // ---------- FILTER PRODUCTS ----------
   const visibleProducts =
     activeFilter === "all"
       ? products
@@ -171,6 +210,7 @@ function Shop() {
           (product) => product.category === activeFilter
         );
 
+  // ---------- UI ----------
   return (
     <div className="font-['DM_Sans',sans-serif] text-[#4a2a35]">
 
@@ -178,6 +218,7 @@ function Shop() {
       <section className="bg-[#faeee9] pb-24 pt-20">
         <div className="mx-auto max-w-[1100px] px-6">
 
+          {/* HEADING AND FILTERS */}
           <div className="mb-14 flex flex-wrap items-center justify-between gap-6">
             <h2 className="font-['Lora',serif] text-5xl font-medium">
               Our latest products

@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -72,6 +71,13 @@ function AdminProducts() {
 
   // Handle API response
   const readResponse = async (response) => {
+    // token expired or rejected: send the admin to login
+    if (response.status === 401) {
+      localStorage.removeItem("petilio_user");
+      navigate("/login", { replace: true });
+      throw new Error("Session expired. Please login again.");
+    }
+
     const text = await response.text();
 
     let data = null;
@@ -144,34 +150,42 @@ function AdminProducts() {
 
     const variants = product.variants || [];
 
+    // a product without sizes only has the hidden "Standard" variant
+    const isDefaultOnly =
+      variants.length === 1 && variants[0].size === "Standard";
+
+    const hasRealVariants = variants.length > 0 && !isDefaultOnly;
+
     setFormData({
       productName: product.productName || "",
       category: product.category || "",
       description: product.description || "",
       imageUrl: product.imageUrl || "",
 
-      hasVariants: variants.length > 0,
+      hasVariants: hasRealVariants,
 
-      price: product.price ?? "",
-      oldPrice: product.oldPrice ?? "",
-      stock: product.stock ?? "",
+      price: isDefaultOnly ? variants[0].price ?? "" : product.price ?? "",
+      oldPrice: isDefaultOnly
+        ? variants[0].oldPrice ?? ""
+        : product.oldPrice ?? "",
+      stock: isDefaultOnly ? variants[0].stock ?? "" : product.stock ?? "",
 
-      variants:
-        variants.length > 0
-          ? variants.map((variant) => ({
-              size: variant.size || "",
-              price: variant.price ?? "",
-              oldPrice: variant.oldPrice ?? "",
-              stock: variant.stock ?? "",
-            }))
-          : [
-              {
-                size: "",
-                price: "",
-                oldPrice: "",
-                stock: "",
-              },
-            ],
+      variants: hasRealVariants
+        ? variants.map((variant) => ({
+          id: variant.id,
+          size: variant.size || "",
+          price: variant.price ?? "",
+          oldPrice: variant.oldPrice ?? "",
+          stock: variant.stock ?? "",
+        }))
+        : [
+          {
+            size: "",
+            price: "",
+            oldPrice: "",
+            stock: "",
+          },
+        ],
     });
 
     setError("");
@@ -195,7 +209,11 @@ function AdminProducts() {
 
     const updatedVariants = [...formData.variants];
 
-    updatedVariants[index][name] = value;
+    // copy the variant, do not change the old state object directly
+    updatedVariants[index] = {
+      ...updatedVariants[index],
+      [name]: value,
+    };
 
     setFormData((prev) => ({
       ...prev,
@@ -325,16 +343,18 @@ function AdminProducts() {
           ? null
           : Number(formData.stock),
 
+        // id is sent for existing variants, so the backend updates the same row
         variants: formData.hasVariants
           ? formData.variants.map((variant) => ({
-              size: variant.size.trim(),
-              price: Number(variant.price),
-              oldPrice:
-                variant.oldPrice === ""
-                  ? null
-                  : Number(variant.oldPrice),
-              stock: Number(variant.stock),
-            }))
+            id: variant.id,
+            size: variant.size.trim(),
+            price: Number(variant.price),
+            oldPrice:
+              variant.oldPrice === ""
+                ? null
+                : Number(variant.oldPrice),
+            stock: Number(variant.stock),
+          }))
           : [],
       };
 
@@ -578,15 +598,18 @@ function AdminProducts() {
                   const totalStock =
                     variants.length > 0
                       ? variants.reduce(
-                          (total, v) => total + Number(v.stock || 0),
-                          0
-                        )
+                        (total, v) => total + Number(v.stock || 0),
+                        0
+                      )
                       : Number(product.stock || 0);
 
+                  // one variant means a product without sizes, so show its price
                   const priceLabel =
-                    variants.length > 0
+                    variants.length > 1
                       ? `${variants.length} variants`
-                      : `₹${product.price ?? 0}`;
+                      : variants.length === 1
+                        ? `₹${variants[0].price ?? 0}`
+                        : `₹${product.price ?? 0}`;
 
                   return (
                     <tr key={product.id} className="hover:bg-[#fffaf4]/60">
@@ -621,11 +644,10 @@ function AdminProducts() {
 
                       <td className="px-5 py-4">
                         <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            totalStock > 0
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${totalStock > 0
                               ? "bg-green-50 text-green-700"
                               : "bg-red-50 text-red-600"
-                          }`}
+                            }`}
                         >
                           {totalStock > 0
                             ? `${totalStock} units`
@@ -923,7 +945,7 @@ function AdminProducts() {
 
                   {formData.variants.map((variant, index) => (
                     <div
-                      key={index}
+                      key={variant.id ?? `new-${index}`}
                       className="rounded-xl border border-gray-200 p-4"
                     >
 

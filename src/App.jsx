@@ -15,7 +15,6 @@ import ProductDetail from "./Components/ProductDetail";
 import Checkout from "./Components/Checkout";
 import Profile from "./Components/Profile";
 import MyOrders from "./Components/MyOrders";
-import ProtectedRoute from "./Components/ProtectedRoute";
 
 // Admin pages
 import AdminLayout from "./Components/Admin/AdminLayout";
